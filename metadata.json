@@ -1,0 +1,5 @@
+{
+  "name": "Copy of API Testing Pro: Advanced Playwright & Cypress Sandbox",
+  "description": "A comprehensive playground for mastering advanced API automation. Features real-world scenarios like OAuth2 flows, stateful CRUD operations, rate limiting simulation, and schema validation with side-by-side Playwright and Cypress code examples.",
+  "requestFramePermissions": []
+}
