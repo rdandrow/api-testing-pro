@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Copy, Check } from './Icons';
 
@@ -19,11 +18,11 @@ const CodeBlock: React.FC<Props> = ({ code }) => {
     <div className="relative group">
       <button 
         onClick={handleCopy}
-        className="absolute right-4 top-4 p-2 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors border border-slate-700 opacity-0 group-hover:opacity-100 z-10"
+        className="absolute right-4 top-4 p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-md transition-all border border-slate-700 opacity-0 group-hover:opacity-100 z-10"
       >
         {copied ? <Check /> : <Copy />}
       </button>
-      <pre className="p-6 bg-[#0d1117] rounded-xl overflow-x-auto border border-slate-800 font-mono text-sm leading-relaxed text-blue-100">
+      <pre className="p-6 bg-[#0d1117] rounded-xl overflow-x-auto border border-slate-200 dark:border-slate-800 font-mono text-sm leading-relaxed text-blue-100 shadow-md">
         <code className="inline-table w-full">
           {code.split('\n').map((line, i) => (
             <div key={i} className="table-row">

@@ -1,4 +1,3 @@
-
 import { ApiResponse } from '../types';
 
 class MockApiService {
@@ -13,6 +12,7 @@ class MockApiService {
   ];
 
   private webhookEvents: any[] = [];
+  private webhookConfig = { url: '', secret: '' };
   private tokens: Set<string> = new Set(['valid-token-123']);
   private rateLimitCounter: number = 0;
   private lastResetTime: number = Date.now();
@@ -45,6 +45,14 @@ class MockApiService {
       };
     }
 
+    if (endpoint === '/error/401') {
+      return { 
+        status: 401, 
+        data: { error: "Unauthorized", message: "Missing or invalid authentication token", code: "AUTH_REQUIRED" }, 
+        headers: {} 
+      };
+    }
+
     if (endpoint === '/error/403') {
       return { 
         status: 403, 
@@ -70,7 +78,6 @@ class MockApiService {
     }
 
     // AUTH METHODS
-    // API Key Auth
     if (endpoint === '/auth/apikey') {
       const apiKey = headers?.['x-api-key'];
       if (apiKey === 'sandbox-key-789') {
@@ -79,7 +86,25 @@ class MockApiService {
       return { status: 403, data: { error: "Forbidden", message: "Invalid or missing X-API-Key" }, headers: {} };
     }
 
-    // JWT Auth
+    if (endpoint === '/auth/secure-resource' && method === 'GET') {
+      const apiKey = headers?.['x-api-key'];
+      if (!apiKey) {
+        return { status: 403, data: { error: "Forbidden", message: "API Key is required in 'x-api-key' header" }, headers: {} };
+      }
+      if (apiKey === 'pro-api-key-2025') {
+        return { 
+          status: 200, 
+          data: { 
+            message: "Success", 
+            confidentialData: "SECRET_PROJECT_ALPHA",
+            serverTime: new Date().toISOString()
+          }, 
+          headers: { 'X-Auth-Level': 'Pro' } 
+        };
+      }
+      return { status: 403, data: { error: "Forbidden", message: "The provided API key is invalid or revoked" }, headers: {} };
+    }
+
     if (endpoint === '/auth/jwt') {
       const authHeader = headers?.['Authorization'] || '';
       if (authHeader.startsWith('Bearer ') && authHeader.split('.').length === 3) {
@@ -90,7 +115,6 @@ class MockApiService {
 
     // EXTERNAL DEPENDENCY PROXY
     if (endpoint === '/proxy/payment' && method === 'POST') {
-      // Simulation of a call to Stripe/Braintree
       const { amount, currency } = body || {};
       if (!amount || !currency) {
         return { status: 400, data: { error: "Missing payment details" }, headers: {} };
@@ -108,16 +132,24 @@ class MockApiService {
     }
 
     // WEBHOOKS
+    if (endpoint === '/webhooks/setup' && method === 'POST') {
+      this.webhookConfig = { url: body.url, secret: body.secret || 'whsec_test' };
+      return { status: 200, data: { message: "Webhook destination registered", config: this.webhookConfig }, headers: {} };
+    }
+
     if (endpoint === '/webhooks/trigger' && method === 'POST') {
+      const eventId = `evt_${Date.now()}`;
       const event = {
-        id: `evt_${Date.now()}`,
+        id: eventId,
         type: body?.type || 'ping',
         payload: body?.payload || {},
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        destination: this.webhookConfig.url || 'internal-history-only',
+        signature: `sha256=${Math.random().toString(36).substring(7)}` // Simulated HMAC
       };
       this.webhookEvents.unshift(event);
       if (this.webhookEvents.length > 10) this.webhookEvents.pop();
-      return { status: 202, data: { message: "Webhook event queued", eventId: event.id }, headers: {} };
+      return { status: 202, data: { message: "Webhook event queued", eventId: event.id, status: "processing" }, headers: {} };
     }
 
     if (endpoint === '/webhooks/history' && method === 'GET') {

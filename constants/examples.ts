@@ -91,16 +91,138 @@ test('Advanced Auth Flow', async ({ request }) => {
     icon: 'Key',
     examples: [
       {
+        title: 'Secure Header-Based API Key Auth',
+        description: 'Demonstrate strict validation of a custom "x-api-key" header, covering positive (valid key), negative (missing key), and negative (invalid key) scenarios.',
+        endpoint: '/auth/secure-resource',
+        method: 'GET',
+        requestBody: {},
+        expectedJson: { message: "Success", confidentialData: "SECRET_PROJECT_ALPHA" },
+        jsonSchema: {
+          requestHeaders: {
+            type: "object",
+            required: ["x-api-key"],
+            properties: {
+              "x-api-key": { 
+                type: "string", 
+                description: "The secret key used for authentication" 
+              }
+            }
+          },
+          responseBody: {
+            type: "object",
+            required: ["message", "confidentialData"],
+            properties: {
+              message: { type: "string", enum: ["Success"] },
+              confidentialData: { type: "string", description: "Sensitive internal project identifier" }
+            }
+          }
+        },
+        validationPoints: [
+          "Positive: Valid key 'pro-api-key-2025' returns 200 OK",
+          "Negative: Missing header returns 403 Forbidden with specific error message",
+          "Negative: Invalid key 'wrong-key' returns 403 Forbidden",
+          "Header Check: Response must include 'X-Auth-Level: Pro' for authorized requests",
+          "Contract: Response body must strictly match the defined JSON schema"
+        ],
+        playwrightCode: `import { test, expect } from '@playwright/test';
+
+test('Strict API Key Header Validation', async ({ request }) => {
+  const url = '/auth/secure-resource';
+
+  // 1. Negative Test: Missing API Key Header
+  const resMissing = await request.get(url);
+  expect(resMissing.status()).toBe(403);
+  const bodyMissing = await resMissing.json();
+  expect(bodyMissing.message).toContain('API Key is required');
+
+  // 2. Negative Test: Invalid API Key
+  const resInvalid = await request.get(url, {
+    headers: { 'x-api-key': 'malicious-key-123' }
+  });
+  expect(resInvalid.status()).toBe(403);
+  expect((await resInvalid.json()).message).toContain('invalid or revoked');
+
+  // 3. Positive Test: Valid API Key
+  const resValid = await request.get(url, {
+    headers: { 'x-api-key': 'pro-api-key-2025' }
+  });
+  expect(resValid.status()).toBe(200);
+  const bodyValid = await resValid.json();
+  expect(bodyValid.confidentialData).toBe('SECRET_PROJECT_ALPHA');
+  expect(resValid.headers()['x-auth-level']).toBe('Pro');
+});`,
+        cypressCode: `describe('Strict API Key Header Validation', () => {
+  const url = '/auth/secure-resource';
+
+  it('should handle all API Key authentication states', () => {
+    // 1. Negative Test: Missing API Key
+    cy.request({
+      url,
+      failOnStatusCode: false
+    }).then((res) => {
+      expect(res.status).to.eq(403);
+      expect(res.body.message).to.include('required');
+    });
+
+    // 2. Negative Test: Invalid API Key
+    cy.request({
+      url,
+      headers: { 'x-api-key': 'invalid-key' },
+      failOnStatusCode: false
+    }).then((res) => {
+      expect(res.status).to.eq(403);
+      expect(res.body.message).to.include('invalid');
+    });
+
+    // 3. Positive Test: Valid API Key
+    cy.request({
+      url,
+      headers: { 'x-api-key': 'pro-api-key-2025' }
+    }).then((res) => {
+      expect(res.status).to.eq(200);
+      expect(res.body.confidentialData).to.eq('SECRET_PROJECT_ALPHA');
+      expect(res.headers).to.have.property('x-auth-level', 'Pro');
+    });
+  });
+});`
+      },
+      {
         title: 'Static API Key Validation',
         description: 'Testing endpoints that require custom headers (X-API-Key) for machine-to-machine communication.',
         endpoint: '/auth/apikey',
         method: 'GET',
         requestBody: {},
         expectedJson: { status: "Authenticated", scope: ["read", "write"] },
+        jsonSchema: {
+          requestHeaders: {
+            type: "object",
+            required: ["x-api-key"],
+            properties: {
+              "x-api-key": { 
+                type: "string", 
+                description: "The secret key used for authentication" 
+              }
+            }
+          },
+          responseBody: {
+            type: "object",
+            required: ["status", "scope"],
+            properties: {
+              status: { type: "string", enum: ["Authenticated"] },
+              scope: {
+                type: "array",
+                items: { type: "string" },
+                minItems: 2,
+                description: "Array of assigned permissions, must include 'read' and 'write'"
+              }
+            }
+          }
+        },
         validationPoints: [
+          "Header: 'x-api-key' is a required string",
           "Header: 'x-api-key' must match 'sandbox-key-789'",
-          "Status: 403 when header is missing",
-          "Body: scope array contains required permissions"
+          "Response: 'status' must be 'Authenticated'",
+          "Response: 'scope' must contain both 'read' and 'write'"
         ],
         playwrightCode: `test('API Key Validation', async ({ request }) => {
   // Negative Test: Missing Key
@@ -113,6 +235,7 @@ test('Advanced Auth Flow', async ({ request }) => {
   });
   expect(resPass.ok()).toBeTruthy();
   const body = await resPass.json();
+  expect(body.scope).toContain('read');
   expect(body.scope).toContain('write');
 });`,
         cypressCode: `it('API Key Validation', () => {
@@ -128,6 +251,7 @@ test('Advanced Auth Flow', async ({ request }) => {
     headers: { 'x-api-key': 'sandbox-key-789' }
   }).then((res) => {
     expect(res.status).to.eq(200);
+    expect(res.body.scope).to.include('read');
     expect(res.body.scope).to.include('write');
   });
 });`
@@ -156,6 +280,129 @@ test('Advanced Auth Flow', async ({ request }) => {
   }).then((res) => {
     expect(res.status).to.eq(200);
     expect(res.body.user).to.eq('qa-test-bot');
+  });
+});`
+      }
+    ]
+  },
+  {
+    id: 'webhooks',
+    title: 'Webhook Integrations',
+    icon: 'Share2',
+    examples: [
+      {
+        title: 'Mocking Outgoing Webhook Calls',
+        description: 'Testing the "Receiver" side of an integration. This scenario involves registering a destination URL, triggering an event, and verifying that the system dispatches the correct payload and security signature (X-Hub-Signature).',
+        endpoint: '/webhooks/setup',
+        method: 'POST',
+        requestBody: { url: "https://mock-listener.test/events", secret: "whsec_test_123" },
+        expectedJson: { message: "Webhook destination registered", config: { url: "https://mock-listener.test/events" } },
+        validationPoints: [
+          "Registration: Setup confirms destination URL and signing secret",
+          "Dispatch: Triggering event produces an outgoing request to the target",
+          "Security: Verify the presence of a 'signature' in the outgoing payload",
+          "Verification: Polling history shows the full outgoing request details"
+        ],
+        playwrightCode: `import { test, expect } from '@playwright/test';
+
+test('Verify Secure Webhook Dispatch', async ({ request }) => {
+  // 1. Setup the Webhook Target
+  const mockTarget = 'https://my-cloud-mock.io/webhook-test';
+  await request.post('/webhooks/setup', {
+    data: { url: mockTarget, secret: 'whsec_9988' }
+  });
+
+  // 2. Trigger an action that fires the webhook
+  const triggerRes = await request.post('/webhooks/trigger', {
+    data: { type: 'order.fulfilled', payload: { orderId: 'ORD-123' } }
+  });
+  const { eventId } = await triggerRes.json();
+
+  // 3. Verify outgoing content via History (Simulating a Receiver Check)
+  await expect.poll(async () => {
+    const res = await request.get('/webhooks/history');
+    const history = await res.json();
+    return history.find(e => e.id === eventId);
+  }, {
+    message: 'Outgoing webhook not dispatched',
+    timeout: 5000,
+  }).toMatchObject({
+    destination: mockTarget,
+    type: 'order.fulfilled',
+    payload: { orderId: 'ORD-123' },
+    signature: expect.stringMatching(/^sha256=/)
+  });
+});`,
+        cypressCode: `describe('Webhook Integration Testing', () => {
+  it('should register and verify outgoing webhook payload', () => {
+    const mockTarget = 'https://webhook.site/test';
+    
+    // 1. Register Receiver
+    cy.request('POST', '/webhooks/setup', { 
+      url: mockTarget, 
+      secret: 'whsec_9988' 
+    });
+
+    // 2. Trigger Event
+    cy.request('POST', '/webhooks/trigger', {
+      type: 'order.fulfilled',
+      payload: { orderId: 'ORD-123' }
+    }).then((res) => {
+      const eventId = res.body.eventId;
+
+      // 3. Polling Verification (Simulating receiver verification)
+      const verifyDispatch = (attempts = 0) => {
+        if (attempts > 5) throw new Error('Timeout waiting for webhook');
+
+        cy.request('/webhooks/history').then((historyRes) => {
+          const entry = historyRes.body.find(e => e.id === eventId);
+          if (!entry) {
+            cy.wait(500);
+            return verifyDispatch(attempts + 1);
+          }
+          
+          expect(entry.destination).to.eq(mockTarget);
+          expect(entry.payload.orderId).to.eq('ORD-123');
+          expect(entry.signature).to.match(/^sha256=/);
+        });
+      };
+
+      verifyDispatch();
+    });
+  });
+});`
+      },
+      {
+        title: 'Asynchronous Event History Verification',
+        description: 'Testing the "Fire and Forget" pattern by triggering an event and verifying the internal audit log of triggered events.',
+        endpoint: '/webhooks/trigger',
+        method: 'POST',
+        requestBody: { type: 'shipment.delivered', payload: { id: 'SHP-101' } },
+        expectedJson: { message: "Webhook event queued", eventId: "evt_123" },
+        playwrightCode: `test('Verify Internal Webhook Audit Log', async ({ request }) => {
+  // 1. Trigger the event
+  const triggerRes = await request.post('/webhooks/trigger', {
+    data: { type: 'shipment.delivered', payload: { id: 'SHP-101' } }
+  });
+  const { eventId } = await triggerRes.json();
+
+  // 2. Verify Audit Log
+  const res = await request.get('/webhooks/history');
+  const history = await res.json();
+  const entry = history.find(e => e.id === eventId);
+  expect(entry).toBeDefined();
+  expect(entry.type).toBe('shipment.delivered');
+});`,
+        cypressCode: `it('Verify Internal Webhook Audit Log', () => {
+  cy.request('POST', '/webhooks/trigger', {
+    type: 'shipment.delivered',
+    payload: { id: 'SHP-101' }
+  }).then((res) => {
+    const eventId = res.body.eventId;
+    cy.request('/webhooks/history').its('body').then((history) => {
+      const entry = history.find(e => e.id === eventId);
+      expect(entry.type).to.eq('shipment.delivered');
+    });
   });
 });`
       }
@@ -197,70 +444,6 @@ test('Advanced Auth Flow', async ({ request }) => {
     expect(res.status).to.eq(200);
     expect(res.headers).to.have.property('x-external-service', 'Stripe-Mock');
     expect(res.body.transactionId).to.match(/^txn_/);
-  });
-});`
-      }
-    ]
-  },
-  {
-    id: 'webhooks',
-    title: 'Webhook Integrations',
-    icon: 'Share2',
-    examples: [
-      {
-        title: 'Asynchronous Event Verification',
-        description: 'Testing the "Fire and Forget" pattern by triggering an event and verifying the outgoing webhook content via history polling.',
-        endpoint: '/webhooks/trigger',
-        method: 'POST',
-        requestBody: { type: 'shipment.delivered', payload: { id: 'SHP-101' } },
-        expectedJson: { message: "Webhook event queued", eventId: "evt_123" },
-        validationPoints: [
-          "Status: 202 Accepted (processing started)",
-          "Verification: Poll history to find the triggered event",
-          "Payload: Ensure webhook payload contains the correct shipment ID"
-        ],
-        playwrightCode: `test('Verify Webhook Dispatch', async ({ request }) => {
-  // 1. Trigger the event
-  const triggerRes = await request.post('/webhooks/trigger', {
-    data: { type: 'shipment.delivered', payload: { id: 'SHP-101' } }
-  });
-  expect(triggerRes.status()).toBe(202);
-  const { eventId } = await triggerRes.json();
-
-  // 2. Poll the history endpoint for verification
-  await expect.poll(async () => {
-    const res = await request.get('/webhooks/history');
-    const history = await res.json();
-    return history.find(e => e.id === eventId);
-  }, {
-    message: 'Webhook event not found in history',
-    timeout: 5000,
-  }).toBeTruthy();
-});`,
-        cypressCode: `it('Verify Webhook Dispatch', () => {
-  // 1. Trigger the event
-  cy.request('POST', '/webhooks/trigger', {
-    type: 'shipment.delivered',
-    payload: { id: 'SHP-101' }
-  }).then((res) => {
-    const eventId = res.body.eventId;
-
-    // 2. Verification using recursion (Polling)
-    const pollHistory = (attempts = 0) => {
-      if (attempts > 5) throw new Error('Webhook timed out');
-      
-      cy.request('/webhooks/history').then((historyRes) => {
-        const found = historyRes.body.find(e => e.id === eventId);
-        if (!found) {
-          cy.wait(500);
-          pollHistory(attempts + 1);
-        } else {
-          expect(found.payload.id).to.eq('SHP-101');
-        }
-      });
-    };
-    
-    pollHistory();
   });
 });`
       }
@@ -395,16 +578,17 @@ test('Stateful Shipment Lifecycle', async ({ request }) => {
           required: ["id", "origin", "destination", "status"],
           properties: {
             id: { type: "string", pattern: "^SHP-\\d+$" },
-            origin: { type: "string" },
-            destination: { type: "string" },
+            origin: { type: "string", enum: ["Paris"], description: "Origin city must be Paris" },
+            destination: { type: "string", enum: ["London"], description: "Destination city must be London" },
             status: { type: "string", enum: ["PENDING", "IN_TRANSIT", "DELIVERED"] }
           }
         },
         validationPoints: [
           "id: Must match pattern SHP-####",
-          "status: Must be one of [PENDING, IN_TRANSIT, DELIVERED]",
-          "origin: Must be exactly 'Paris'",
-          "destination: Must be exactly 'London'"
+          "status: Initial shipment status must be 'PENDING'",
+          "origin: Field must be strictly 'Paris' (Exact Value Check)",
+          "destination: Field must be strictly 'London' (Exact Value Check)",
+          "Lifecycle: Verify the resource exists in registry and is successfully removed"
         ],
         playwrightCode: `import { test, expect } from '@playwright/test';
 
@@ -417,15 +601,13 @@ test('Full CRUD Lifecycle with Schema Validation', async ({ request }) => {
   const newShipment = await createRes.json();
   const shipmentId = newShipment.id;
 
-  // 2. Validate JSON Schema
-  // In a real project, use a library like 'ajv'
+  // 2. Validate JSON Schema & Values
   expect(newShipment).toMatchObject({
     id: expect.stringMatching(/^SHP-\\d+$/),
     origin: 'Paris',
     destination: 'London',
     status: 'PENDING'
   });
-  expect(typeof newShipment.id).toBe('string');
 
   // 3. Verify in list
   const listRes = await request.get('/shipments');
@@ -448,10 +630,12 @@ test('Full CRUD Lifecycle with Schema Validation', async ({ request }) => {
       const shipment = res.body;
       const id = shipment.id;
 
-      // 2. Validate JSON Schema (Manual checks as example)
+      // 2. Validate JSON Schema & Explicit Values
       expect(shipment).to.have.all.keys('id', 'origin', 'destination', 'status');
       expect(shipment.id).to.match(/^SHP-\\d+$/);
-      expect(shipment.status).to.be.oneOf(['PENDING', 'IN_TRANSIT', 'DELIVERED']);
+      expect(shipment.status).to.eq('PENDING');
+      expect(shipment.origin).to.eq('Paris');
+      expect(shipment.destination).to.eq('London');
 
       // 3. Verify in list
       cy.request('/shipments')
@@ -501,6 +685,30 @@ test('Full CRUD Lifecycle with Schema Validation', async ({ request }) => {
   }).then((res) => {
     expect(res.status).to.eq(400);
     expect(res.body.error).to.eq('Bad Request');
+  });
+});`
+      },
+      {
+        title: 'Unauthorized Access (401)',
+        description: 'Test that the API correctly rejects requests when authentication is missing or invalid.',
+        endpoint: '/error/401',
+        method: 'GET',
+        expectedJson: { error: "Unauthorized", message: "Missing or invalid authentication token", code: "AUTH_REQUIRED" },
+        playwrightCode: `test('Handle 401 Unauthorized', async ({ request }) => {
+  const res = await request.get('/error/401');
+  
+  expect(res.status()).toBe(401);
+  const body = await res.json();
+  expect(body.error).toBe('Unauthorized');
+  expect(body.code).toBe('AUTH_REQUIRED');
+});`,
+        cypressCode: `it('Handle 401 Unauthorized', () => {
+  cy.request({
+    url: '/error/401',
+    failOnStatusCode: false
+  }).then((res) => {
+    expect(res.status).to.eq(401);
+    expect(res.body.error).to.eq('Unauthorized');
   });
 });`
       },
